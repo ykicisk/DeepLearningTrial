@@ -132,17 +132,22 @@ class ChainerPredictor(object):
                     sum_values[key] += (val.data) * self.batch_size
             sys.stdout.write("train: ")
             for key, val in sum_values.items():
-                sys.stdout.write("{}:{}, ".format(key, val / N))
+                sys.stdout.write("{}:{}, ".format(key, val/ N))
             sys.stdout.write("\n")
 
-    def predict(self, X, Y):
-        # 勾配を初期化
-        self.optimizer.zero_grads()
+    def test(self, X, Y, batch_size=100):
         # 順伝播させて誤差と精度を算出
-        result = self.model.forward(x_batch, y_batch, train=False)
+        N = X.shape[0]
+        sum_values = defaultdict(float)
+        for i in xrange(0, N, batch_size):
+            x_batch = X[i:i+batch_size]
+            y_batch = Y[i:i+batch_size]
+            result = self.model.forward(x_batch, y_batch, train=False)
+            for key, val in result.items():
+                sum_values[key] += (val.data) * batch_size
         sys.stdout.write("test: ")
         for key, val in sum_values.items():
-            sys.stdout.write("{}:{}, ".format(key, val / N))
+            sys.stdout.write("{}:{}, ".format(key, val/ N))
         sys.stdout.write("\n")
 
     def save(self, dst_path):
@@ -171,6 +176,7 @@ def train(image_path, dst_path, batch_size=100, n_epoch=20, n_units=1000,
     predictor.train(X, Y)
     # 保存
     predictor.save(dst_path)
+    return predictor
 
 
 if __name__ == "__main__":
