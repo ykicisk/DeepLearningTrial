@@ -14,9 +14,7 @@ $ python
  
 http://qiita.com/TomokIshii/items/92a266b805d7eee02b1d
 
-## ~~(応用) TensorflowのRNNで俳句生成~~
-
-
+## (応用) TensorflowのRNNで俳句生成
 
 ## 俳句データセット
 
@@ -27,7 +25,7 @@ http://qiita.com/TomokIshii/items/92a266b805d7eee02b1d
 こちらを参考
 http://qiita.com/kiminaka/items/87afd4a433dc655d8cfd
 
-## BasicRNNCell
+## RNN on Tensorflow (BasicRNNCell)
 
 上記URLで記述されていた最もシンプルなRNNは、`BasicRNNCell`クラスで実装されている。
 https://github.com/tensorflow/tensorflow/blob/master/tensorflow/python/ops/rnn_cell.py#L174-L195
@@ -68,13 +66,23 @@ output = self._activation(_linear([inputs, state], self._num_units, True))
 
 ## todo
 
-* [ ] 学習データ集める
-* [ ] 形態素解析してword vectorに変換(上句, 中句などの終端記号も付与)
+* [x] 学習データ(俳句)収集
+* [ ] 学習データをtokenizeする。
 * [ ] RNN学習用バッチ関数を作る
 * [ ] RNN構築
 * [ ] 学習を回す
 * [ ] 生成器を作る
 * [ ] 可視化
+
+## 学習データの収集
+
+```sh
+$ ./scripts/download_haiku.py -d data/haiku_list.txt
+$ wc -l data/haiku_list.txt
+38919 data/haiku_list.txt
+```
+
+## 学習データのtokenize
 
 ## 参考
 
