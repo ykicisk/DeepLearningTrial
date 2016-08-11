@@ -2,17 +2,7 @@
 
 ## (基本) TensorflowでMNIST
 
-### 準備
-
-```sh
-$ python
->>> from tensorflow.examples.tutorials.mnist import input_data
->>> mnist = input_data.read_data_sets("MNIST_data/", one_hot=True)
-```
-
-### 参考
- 
-http://qiita.com/TomokIshii/items/92a266b805d7eee02b1d
+[こちら](tutorials/README.md)を参照
 
 ## (応用) TensorflowのRNNで俳句生成
 
@@ -67,7 +57,7 @@ output = self._activation(_linear([inputs, state], self._num_units, True))
 ## todo
 
 * [x] 学習データ(俳句)収集
-* [ ] 学習データをtokenizeする。
+* [x] 学習データをtokenizeする。
 * [ ] RNN学習用バッチ関数を作る
 * [ ] RNN構築
 * [ ] 学習を回す
