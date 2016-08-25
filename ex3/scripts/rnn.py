@@ -10,7 +10,7 @@ class RNNBase(object):
     u"""RNNのベースクラス"""
     def __init__(self, cell, n_src_dim, len_seq, n_dst_dim,
                  pre_inference_func, post_inference_func,
-                 loss_func, accuracy_func):
+                 loss_func, accuracy_func, dropout_rate):
         u"""
         # RNNの入力(sequenceが同じ長さの場合)
         * input: tf variable len_seq * (batch, n_rnn_node)
@@ -30,11 +30,13 @@ class RNNBase(object):
         self.n_src_dim = n_src_dim
         self.len_seq = len_seq
         self.n_dst_dim = n_dst_dim
+        self.dropout_rate = dropout_rate
         # place holders
         self.src_ph = tf.placeholder(tf.float32, [None, len_seq, n_src_dim],
                                      name="src_ph")
         self.dst_ph = tf.placeholder(tf.float32, [None, n_dst_dim],
                                      name="dst_ph")
+        self.keep_prob = tf.placeholder("float", name="keep_prob")
         # state_sizeはRNNCellによって違ったりする。
         self.init_state_ph = tf.placeholder(tf.float32,
                                             [None, self.cell.state_size],
@@ -63,7 +65,8 @@ class RNNBase(object):
         init_state_arr_all = np.zeros((X_all.shape[0], self.cell.state_size))
         eval_dict = {
                 "src_ph:0": X_all, "dst_ph:0": _y_all,
-                "init_state_ph:0": init_state_arr_all
+                "init_state_ph:0": init_state_arr_all,
+                "keep_prob:0": 1.0
         }
         for X, _y, is_EOE in batch_gen:
             batch_size = X.shape[0]
@@ -72,7 +75,8 @@ class RNNBase(object):
             # see: https://github.com/tensorflow/tensorflow/issues/3378
             train_dict = {
                     "src_ph:0": X, "dst_ph:0": _y,
-                    "init_state_ph:0": init_state_arr
+                    "init_state_ph:0": init_state_arr,
+                    "keep_prob:0": self.dropout_rate
             }
             self.sess.run(optimize_op, feed_dict=train_dict)
             if is_EOE:
@@ -87,7 +91,8 @@ class RNNBase(object):
         init_state_arr = np.zeros((X.shape[0], self.cell.state_size))
         test_dict = {
                 "src_ph:0": X, "dst_ph:0": _y,
-                "init_state_ph:0": init_state_arr
+                "init_state_ph:0": init_state_arr,
+                "keep_prob:0": 1.0
         }
         test_accuracy = self.sess.run(self.accuracy_op, feed_dict=test_dict)
         print "test accuracy:", test_accuracy
@@ -109,7 +114,7 @@ class RNNBase(object):
 
 class BasicLSTM(RNNBase):
     def __init__(self, n_src_dim, len_seq, n_dst_dim,
-                 n_hidden_node=80, forget_bias=0.8):
+                 n_hidden_node=80, forget_bias=0.8, dropout_rate=0.6):
         self.n_hidden_node = n_hidden_node
         # cell = LSTMCell みたいな
         cell = tf.nn.rnn_cell.BasicLSTMCell(n_hidden_node,
@@ -119,7 +124,8 @@ class BasicLSTM(RNNBase):
             n_src_dim=n_src_dim, len_seq=len_seq, n_dst_dim=n_dst_dim,
             pre_inference_func=self.pre_inference_func,
             post_inference_func=self.post_inference_func,
-            loss_func=self.loss_func, accuracy_func=self.accuracy_func
+            loss_func=self.loss_func, accuracy_func=self.accuracy_func,
+            dropout_rate=dropout_rate
             )
 
     def pre_inference_func(self, src_ph):

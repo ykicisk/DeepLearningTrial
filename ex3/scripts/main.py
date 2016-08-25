@@ -8,16 +8,18 @@ import tensorflow as tf
 import rnn
 
 # parameters
-LEARNING_RATE = 0.001
-N_HIDDEN_NODE = 30
+LEARNING_RATE = 0.05
+N_HIDDEN_NODE = 50
 FORGET_BIAS = 0.8
 
 
 class N225Predictor(rnn.RNNBase):
     def __init__(self, n_src_dim, len_seq, n_dst_dim, ml_type,
-                 n_hidden_node=80, forget_bias=0.8):
+                 n_hidden_node=80, forget_bias=0.8, dropout_rate=0.4,
+                 class_weight=[1, 1]):
         self.n_hidden_node = n_hidden_node
         self.ml_type = ml_type
+        self.class_weight = class_weight
         # cell = LSTMCell みたいな
         cell = tf.nn.rnn_cell.BasicLSTMCell(n_hidden_node,
                                             forget_bias=forget_bias)
@@ -26,7 +28,8 @@ class N225Predictor(rnn.RNNBase):
             n_src_dim=n_src_dim, len_seq=len_seq, n_dst_dim=n_dst_dim,
             pre_inference_func=self.pre_inference_func,
             post_inference_func=self.post_inference_func,
-            loss_func=self.loss_func, accuracy_func=self.accuracy_func
+            loss_func=self.loss_func, accuracy_func=self.accuracy_func,
+            dropout_rate=dropout_rate
             )
 
     def pre_inference_func(self, src_ph):
@@ -43,7 +46,7 @@ class N225Predictor(rnn.RNNBase):
             # (len_seq * batch, src_dim) * (src_dim, n_node)
             # => (len_seq * batch, n_node)
             # in3 = tf.matmul(in2, W1) + b1
-            in3 = tf.nn.relu(tf.matmul(in2, W1) + b1)
+            in3 = tf.nn.dropout(tf.nn.relu(tf.matmul(in2, W1) + b1), self.keep_prob)
             # (len_seq * batch, n_node) => len_seq * (batch, n_node)
             rnn_src_op = tf.split(0, self.len_seq, in3)
             return rnn_src_op
@@ -73,10 +76,10 @@ class N225Predictor(rnn.RNNBase):
                 dst_op = tf.nn.relu(tf.matmul(h1, W2_2) + b2_2)
                 # dst_op = tf.nn.relu(tf.matmul(rnn_dst_op[-1], W2) + b2)
             elif self.ml_type == "classification":
-                h1 = tf.nn.relu(tf.matmul(rnn_dst_op[-1], W2_1) + b2_1)
+                h1 = tf.nn.dropout(tf.nn.relu(tf.matmul(rnn_dst_op[-1], W2_1) + b2_1), self.keep_prob)
                 dst_op = tf.nn.softmax(tf.matmul(h1, W2_2) + b2_2)
-                # dst_op = tf.nn.softmax(tf.matmul(rnn_dst_op[-1], W2) + b2)
 
+                # dst_op = tf.nn.softmax(tf.matmul(rnn_dst_op[-1], W2) + b2)
             return dst_op
 
     def loss_func(self, dst_op, dst_ph):
@@ -87,7 +90,10 @@ class N225Predictor(rnn.RNNBase):
             elif self.ml_type == "classification":
                 # cross entropy loss (- sum(y_ * log(y))) の定義
                 # 演算子 * は行列の要素ごとの積っぽいreduction_indices == axis
-                loss = tf.reduce_mean(-tf.reduce_sum(dst_ph * tf.log(dst_op),
+                class_weight_c = tf.constant(self.class_weight)
+                # class_weight_c = tf.constant(1.0 / np.array(self.class_weight), tf.float32)
+                weighted_gt_dst = tf.mul(dst_ph, class_weight_c) # shape [batch_size, 2]
+                loss = tf.reduce_mean(-tf.reduce_sum(weighted_gt_dst * tf.log(dst_op),
                                                      reduction_indices=[1]))
             return loss
 
@@ -110,19 +116,37 @@ class N225Predictor(rnn.RNNBase):
 
 
 def create_learning_data(df, date_range):
-    n225_idx = df.columns.get_loc("N225")
-    features = df.as_matrix()
-    # diff = features[1:]-features[:-1]
-    diff = (features[1:]-features[:-1])/features[:-1] * 100
-    # diff = diff * 100
-    _y = diff[date_range:, [n225_idx]] * 100
-    # _y = diff[(date_range-1):, [n225_idx]] * 100
-    # n_sample * date_range * n_dim?
-    n = diff.shape[0]
-    tpl = (diff[i:(n-date_range+i), :] for i in range(date_range))
-    X = np.transpose(np.dstack(tpl), axes=(0, 2, 1))
+    ex_features = ["DJI", "IXIC", "N100", "EURJPY", "USDJPY"]
+    targets = filter(lambda x: x not in ex_features, df.columns)
+    _ys = []
+    Xs = []
+    for tgt in targets:
+        _df = df[[tgt] + ex_features].dropna()  # nanは雑に削除
+        tgt_idx = 0
+        features = _df.as_matrix()
+        diff = (features[1:]-features[:-1])/features[:-1] * 100
+        _y = diff[date_range:, [tgt_idx]] * 100
+        n = diff.shape[0]
+        x_list = []
+        # print "----"
+        for i in range(date_range):
+            x = diff[i:(n-date_range+i), :]
+            if x.shape[0] > 0:
+                x_list.append(x)
+                # print x.shape
+        if not x_list:
+            continue
+        X = np.transpose(np.dstack(x_list), axes=(0, 2, 1))
+        if _y.shape[0] == 0:
+            continue
+        _ys.append(_y)
+        Xs.append(X)
+        # print X.shape, _y.shape
     # print X[-1]
     # print _y[-1]
+    X = np.concatenate(Xs, axis=0)
+    _y = np.concatenate(_ys, axis=0)
+    print X.shape, _y.shape
     return X, _y
 
 
@@ -133,14 +157,28 @@ def cvt2classification_label(y):
 
 
 def main(mode, model_path, ml_type, data_path, date_range,
-         boundary_date, n_epoch, batch_size):
+         boundary_date, n_epoch, batch_size, indivisual_path):
     print "load learning data:", data_path
     df = pd.read_csv(data_path, compression="gzip", index_col=0,
                      parse_dates=True)
     boundary_pdts = pd.Timestamp(boundary_date)
+    indivisual_df = None
+    if indivisual_path is not None:
+        print "load indivisual stock data:", indivisual_path
+        indivisual_df = pd.read_csv(indivisual_path, compression="gzip",
+                                    index_col=0, parse_dates=True)
+        df = df.join(indivisual_df, how="inner")
     trainX, train_y = create_learning_data(df[:boundary_pdts], date_range)
     testX, test_y = create_learning_data(df[boundary_pdts:], date_range)
+
+    class_weight = [1.0, 1.0]
     if ml_type == "classification":
+        rasio1 = (train_y >= 0).astype(np.float32).sum() / train_y.shape[0]
+        rasio0 = 1.0 - rasio1
+        class_weight = [rasio0, rasio1]
+        # class_weight = [rasio1, rasio0]
+        # class_weight = [rasio0, rasio1]
+        print class_weight
         train_y = cvt2classification_label(train_y)
         test_y = cvt2classification_label(test_y)
     print trainX.shape, train_y.shape
@@ -153,7 +191,8 @@ def main(mode, model_path, ml_type, data_path, date_range,
     model = N225Predictor(n_src_dim=n_src_dim, len_seq=date_range,
                           n_dst_dim=n_dst_dim, ml_type=ml_type,
                           n_hidden_node=N_HIDDEN_NODE,
-                          forget_bias=FORGET_BIAS, )
+                          forget_bias=FORGET_BIAS,
+                          class_weight=class_weight)
     if mode == "train":
         batch_gen = rnn.batch_generator(trainX, train_y, n_epoch, batch_size)
         optimizer = tf.train \
@@ -163,7 +202,7 @@ def main(mode, model_path, ml_type, data_path, date_range,
     elif mode == "test":
         model.load(model_path)
         pred_y = model.test(testX, test_y)
-        print np.concatenate([test_y, pred_y], axis=1)
+        # print np.concatenate([test_y, pred_y], axis=1)
 
 
 if __name__ == "__main__":
@@ -184,6 +223,8 @@ if __name__ == "__main__":
                         help='num of epoch (use in only train mode)')
     parser.add_argument('-b', "--batch", default=300, type=int,
                         help='batch size (use in only train mode)')
+    parser.add_argument('-i', "--indivisual", default=None,
+                        help='indivisual stock prediction')
     args = parser.parse_args()
     main(args.mode, args.model, args.type, args.data, args.range,
-         args.boundary_date, args.epoch, args.batch)
+         args.boundary_date, args.epoch, args.batch, args.indivisual)
